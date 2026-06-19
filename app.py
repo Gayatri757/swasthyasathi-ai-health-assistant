@@ -17,7 +17,7 @@ st.set_page_config(
 )
 
 # ----------------------------
-# UI STYLE
+# CUSTOM CSS
 # ----------------------------
 
 st.markdown("""
@@ -28,7 +28,7 @@ background: linear-gradient(to right,#eef5ff,#f8fbff);
 }
 
 .main-title{
-font-size:48px;
+font-size:38px;
 font-weight:800;
 text-align:center;
 color:#1f4db8;
@@ -37,27 +37,36 @@ margin-bottom:10px;
 
 .subtitle{
 text-align:center;
-font-size:20px;
+font-size:18px;
 color:#555;
 margin-bottom:30px;
 }
 
 .card{
 background:white;
-padding:25px;
+padding:20px;
 border-radius:15px;
 box-shadow:0px 6px 18px rgba(0,0,0,0.12);
 text-align:center;
-height:320px;
+
+min-height:260px;
+height:auto;
+
 display:flex;
 flex-direction:column;
 justify-content:center;
 align-items:center;
+
 transition:0.3s;
+
+margin-bottom:20px;
+
+overflow-wrap:break-word;
+word-wrap:break-word;
 }
 
 .card:hover{
-transform:scale(1.03);
+transform:scale(1.02);
 box-shadow:0px 8px 22px rgba(0,0,0,0.18);
 }
 
@@ -78,7 +87,7 @@ border-right:1px solid #eee;
 """, unsafe_allow_html=True)
 
 # ----------------------------
-# LOAD MODEL
+# LOAD MODELS
 # ----------------------------
 
 clf = joblib.load("disease_model.pkl")
@@ -95,35 +104,35 @@ def get_specialist(disease):
 
     d = disease.lower()
 
-    if any(x in d for x in ["stress","anxiety","panic","depression"]):
+    if any(x in d for x in ["stress", "anxiety", "panic", "depression"]):
         return "Psychiatrist"
 
-    elif any(x in d for x in ["heart","cardio","hypertension"]):
+    elif any(x in d for x in ["heart", "cardio", "hypertension"]):
         return "Cardiologist"
 
-    elif any(x in d for x in ["lung","asthma","pneumonia","respiratory"]):
+    elif any(x in d for x in ["lung", "asthma", "pneumonia", "respiratory"]):
         return "Pulmonologist"
 
-    elif any(x in d for x in ["brain","migraine","epilepsy","neuro"]):
+    elif any(x in d for x in ["brain", "migraine", "epilepsy", "neuro"]):
         return "Neurologist"
 
-    elif any(x in d for x in ["skin","acne","eczema","dermat"]):
+    elif any(x in d for x in ["skin", "acne", "eczema", "dermat"]):
         return "Dermatologist"
 
-    elif any(x in d for x in ["kidney","urinary","bladder"]):
+    elif any(x in d for x in ["kidney", "urinary", "bladder"]):
         return "Urologist"
 
-    elif any(x in d for x in ["pregnancy","vaginal","uterus","menstrual"]):
+    elif any(x in d for x in ["pregnancy", "vaginal", "uterus", "menstrual"]):
         return "Gynecologist"
 
-    elif any(x in d for x in ["diabetes","thyroid","hormone"]):
+    elif any(x in d for x in ["diabetes", "thyroid", "hormone"]):
         return "Endocrinologist"
 
     else:
         return "General Physician"
 
 # ----------------------------
-# SEVERITY SCORE FUNCTION
+# SEVERITY SCORE
 # ----------------------------
 
 def calculate_severity(symptoms, disease):
@@ -209,7 +218,7 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     return R * c
 
 # ----------------------------
-# ETA
+# AMBULANCE ETA
 # ----------------------------
 
 def estimate_eta(distance_km):
@@ -228,7 +237,8 @@ st.markdown("""
 </div>
 
 <div class="subtitle">
-Your AI Powered Health Assistant<br>
+Your AI Powered Health Assistant
+<br>
 Predict diseases, analyze severity and find nearby hospitals
 </div>
 """, unsafe_allow_html=True)
@@ -259,7 +269,6 @@ if st.sidebar.button("🔍 Predict Disease"):
         features = [0] * num_features
 
         for s in selected_symptoms:
-
             idx = symptoms_list.index(s)
             features[idx] = 1
 
@@ -267,14 +276,15 @@ if st.sidebar.button("🔍 Predict Disease"):
 
         probs = clf.predict_proba(input_vector)[0]
 
-        top3 = probs.argsort()[-3:][::-1]
+        top2 = probs.argsort()[-2:][::-1]
 
         st.subheader("🧠 Possible Diseases")
 
-        col1, col2, col3 = st.columns(3)
-        cols = [col1, col2, col3]
+        col1, col2 = st.columns(2)
 
-        for i, idx in enumerate(top3):
+        cols = [col1, col2]
+
+        for i, idx in enumerate(top2):
 
             disease = le.inverse_transform([idx])[0]
 
@@ -316,7 +326,7 @@ if st.sidebar.button("🔍 Predict Disease"):
                 """, unsafe_allow_html=True)
 
         # ----------------------------
-        # ALERT
+        # ALERTS
         # ----------------------------
 
         if severity_score >= 70:
@@ -343,12 +353,15 @@ if st.sidebar.button("🔍 Predict Disease"):
 
 st.divider()
 
-st.subheader("🏥 Nearby Hospitals & Emergency System")
+st.subheader("🏥 Nearby Hospitals")
 
 col1, col2 = st.columns(2)
 
 with col1:
-    location = st.text_input("Enter City", "Pune")
+    location = st.text_input(
+        "Enter City",
+        "Pune"
+    )
 
 with col2:
     radius = st.slider(
@@ -371,7 +384,7 @@ if st.button("Find Hospitals"):
         }
 
         # ----------------------------
-        # GEO LOCATION
+        # GET LOCATION COORDINATES
         # ----------------------------
 
         geo = requests.get(
@@ -452,11 +465,11 @@ if st.button("Find Hospitals"):
 
             except:
                 st.warning(
-                    "Primary API failed, using fallback..."
+                    "Using fallback hospital search..."
                 )
 
         # ----------------------------
-        # FALLBACK
+        # FALLBACK SEARCH
         # ----------------------------
 
         if not hospital_list:
@@ -496,6 +509,10 @@ if st.button("Find Hospitals"):
                     "Longitude": lon
                 })
 
+        # ----------------------------
+        # NO HOSPITALS
+        # ----------------------------
+
         if not hospital_list:
 
             st.error("No hospitals found")
@@ -510,6 +527,10 @@ if st.button("Find Hospitals"):
             f"{len(hospital_list)} hospitals found"
         )
 
+        # ----------------------------
+        # TABLE
+        # ----------------------------
+
         df = pd.DataFrame(hospital_list)
 
         st.dataframe(
@@ -518,7 +539,20 @@ if st.button("Find Hospitals"):
         )
 
         # ----------------------------
-        # DIRECTIONS
+        # MAP
+        # ----------------------------
+
+        st.subheader("🗺 Nearby Hospitals Map")
+
+        map_df = pd.DataFrame({
+            "lat": [h["Latitude"] for h in hospital_list],
+            "lon": [h["Longitude"] for h in hospital_list]
+        })
+
+        st.map(map_df)
+
+        # ----------------------------
+        # HOSPITAL CARDS
         # ----------------------------
 
         st.subheader("🚗 Directions")
@@ -532,11 +566,16 @@ if st.button("Find Hospitals"):
 
             st.markdown(f"""
             <div class="hospital-card">
+
             🏥 <b>{h['Hospital']}</b><br>
-            📍 Distance: {h['Distance (km)']} km<br>
+
+            📍 Distance:
+            {h['Distance (km)']} km<br><br>
+
             <a href="{directions}" target="_blank">
             🧭 Open in Google Maps
             </a>
+
             </div>
             """, unsafe_allow_html=True)
 
@@ -546,9 +585,9 @@ if st.button("Find Hospitals"):
 
         st.divider()
 
-        st.subheader("🚨 Emergency Ambulance System")
+        st.subheader("🚑 Emergency Ambulance System")
 
-        if st.button("🚑 Call Ambulance"):
+        if st.button("🚨 Call Ambulance"):
 
             nearest = hospital_list[0]
 
