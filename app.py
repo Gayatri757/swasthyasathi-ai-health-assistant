@@ -209,106 +209,138 @@ if st.sidebar.button("🔍 Predict Disease"):
                 """, unsafe_allow_html=True)
 
 # ----------------------------
-# HOSPITAL FINDER
-# ----------------------------
-
-st.divider()
-
-st.subheader("🏥 Nearby Hospitals")
-
-col1,col2 = st.columns(2)
-
-with col1:
-    location = st.text_input("Enter City","Pune")
-
-with col2:
-    radius = st.slider("Search Radius (meters)",1000,10000,3000)
-
-# ----------------------------
-# SEARCH HOSPITALS
+# SEARCH HOSPITALS (FINAL FIX - DEPLOYMENT SAFE)
 # ----------------------------
 
 if st.button("Find Hospitals"):
 
     try:
+        # ------------------------
+        # STEP 1: GET LAT/LON
+        # ------------------------
+        geo_url = "https://nominatim.openstreetmap.org/search"
+        params = {"q": location, "format": "json"}
+        headers = {"User-Agent": "SwasthyaSathi"}
 
-        geo_url="https://nominatim.openstreetmap.org/search"
+        geo = requests.get(geo_url, params=params, headers=headers, timeout=20)
 
-        params={"q":location,"format":"json"}
-
-        headers={"User-Agent":"SwasthyaSathi"}
-
-        geo=requests.get(geo_url,params=params,headers=headers).json()
-
-        if not geo:
+        if geo.status_code != 200 or not geo.json():
             st.error("Location not found")
             st.stop()
 
-        lat=float(geo[0]["lat"])
-        lon=float(geo[0]["lon"])
+        geo_data = geo.json()
+        lat = float(geo_data[0]["lat"])
+        lon = float(geo_data[0]["lon"])
 
-        overpass_query=f"""
+        # ------------------------
+        # STEP 2: OVERPASS QUERY (POST FIXED)
+        # ------------------------
+        overpass_query = f"""
         [out:json];
         node["amenity"="hospital"](around:{radius},{lat},{lon});
         out;
         """
 
-        response=requests.get(
-        "https://overpass-api.de/api/interpreter",
-        params={"data":overpass_query}
+        response = requests.post(
+            "https://overpass-api.de/api/interpreter",
+            data={"data": overpass_query},
+            timeout=30
         )
 
-        data=response.json()
-        hospitals=data.get("elements",[])
+        # ------------------------
+        # STEP 3: SAFE RESPONSE HANDLING
+        # ------------------------
+        hospital_list = []
 
-        hospital_list=[]
+        if response.status_code == 200:
+            try:
+                data = response.json()
+                hospitals = data.get("elements", [])
 
-        for h in hospitals:
+                for h in hospitals:
+                    tags = h.get("tags", {})
+                    name = tags.get("name", "Hospital")
 
-            tags=h.get("tags",{})
-            name=tags.get("name","Hospital")
+                    h_lat = h.get("lat")
+                    h_lon = h.get("lon")
 
-            h_lat=h["lat"]
-            h_lon=h["lon"]
+                    if not h_lat or not h_lon:
+                        continue
 
-            distance=calculate_distance(lat,lon,h_lat,h_lon)
+                    distance = calculate_distance(lat, lon, h_lat, h_lon)
 
-            hospital_list.append({
-            "Hospital":name,
-            "Distance (km)":round(distance,2),
-            "Latitude":h_lat,
-            "Longitude":h_lon
-            })
+                    hospital_list.append({
+                        "Hospital": name,
+                        "Distance (km)": round(distance, 2),
+                        "Latitude": h_lat,
+                        "Longitude": h_lon
+                    })
 
-        hospital_list=sorted(
-        hospital_list,
-        key=lambda x:x["Distance (km)"]
-        )
+            except Exception:
+                st.warning("Overpass API failed, using fallback data...")
+
+        # ------------------------
+        # STEP 4: FALLBACK (VERY IMPORTANT FOR STREAMLIT CLOUD)
+        # ------------------------
+        if not hospital_list:
+            fallback = requests.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={
+                    "q": "hospital " + location,
+                    "format": "json",
+                    "limit": 10
+                },
+                headers=headers,
+                timeout=20
+            )
+
+            for h in fallback.json():
+                h_lat = float(h["lat"])
+                h_lon = float(h["lon"])
+
+                distance = calculate_distance(lat, lon, h_lat, h_lon)
+
+                hospital_list.append({
+                    "Hospital": h.get("display_name", "Hospital"),
+                    "Distance (km)": round(distance, 2),
+                    "Latitude": h_lat,
+                    "Longitude": h_lon
+                })
+
+        # ------------------------
+        # STEP 5: DISPLAY RESULTS
+        # ------------------------
+        if not hospital_list:
+            st.error("No hospitals found")
+            st.stop()
+
+        hospital_list = sorted(hospital_list, key=lambda x: x["Distance (km)"])
 
         st.success(f"{len(hospital_list)} hospitals found")
 
-        df=pd.DataFrame(hospital_list)
+        df = pd.DataFrame(hospital_list)
 
-        st.dataframe(df[["Hospital","Distance (km)"]],width="stretch")
+        st.dataframe(df[["Hospital", "Distance (km)"]], use_container_width=True)
 
+        # ------------------------
+        # GOOGLE MAPS LINKS
+        # ------------------------
         st.subheader("🚗 Directions")
 
         for h in hospital_list[:5]:
 
-            directions=f"https://www.google.com/maps/dir/?api=1&destination={h['Latitude']},{h['Longitude']}"
+            link = f"https://www.google.com/maps/dir/?api=1&destination={h['Latitude']},{h['Longitude']}"
 
             st.markdown(f"""
-            <div class="hospital-card">
-            🏥 <b>{h['Hospital']}</b><br>
-            📍 Distance: {h['Distance (km)']} km<br>
-            <a href="{directions}" target="_blank">🧭 Open in Google Maps</a>
-            </div>
-            """, unsafe_allow_html=True)
+            🏥 **{h['Hospital']}**  
+            📍 {h['Distance (km)']} km  
+            👉 [Open in Google Maps]({link})
+            ---
+            """)
 
     except Exception as e:
-
         st.error("Error fetching hospitals")
-        st.write(e)
+        st.write(str(e))
 
 # ----------------------------
 # DISCLAIMER
