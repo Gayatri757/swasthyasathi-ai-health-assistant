@@ -8,7 +8,6 @@ from math import radians, cos, sin, asin, sqrt
 # ----------------------------
 # PAGE CONFIG
 # ----------------------------
-
 st.set_page_config(
     page_title="SwasthyaSathi",
     page_icon="🩺",
@@ -18,10 +17,8 @@ st.set_page_config(
 # ----------------------------
 # UI STYLE
 # ----------------------------
-
 st.markdown("""
 <style>
-
 .stApp{
 background: linear-gradient(to right,#eef5ff,#f8fbff);
 }
@@ -52,12 +49,6 @@ display:flex;
 flex-direction:column;
 justify-content:center;
 align-items:center;
-transition:0.3s;
-}
-
-.card:hover{
-transform:scale(1.03);
-box-shadow:0px 8px 22px rgba(0,0,0,0.18);
 }
 
 .hospital-card{
@@ -67,174 +58,144 @@ border-radius:12px;
 box-shadow:0px 3px 10px rgba(0,0,0,0.08);
 margin-bottom:12px;
 }
-
-section[data-testid="stSidebar"]{
-background:#ffffff;
-border-right:1px solid #eee;
-}
-
 </style>
 """, unsafe_allow_html=True)
 
 # ----------------------------
 # LOAD MODEL
 # ----------------------------
-
 clf = joblib.load("disease_model.pkl")
 le = joblib.load("label_encoder.pkl")
 symptoms_list = joblib.load("symptoms_list.pkl")
-
 num_features = len(symptoms_list)
 
 # ----------------------------
-# SPECIALIST DETECTION
+# SPECIALIST FUNCTION
 # ----------------------------
-
 def get_specialist(disease):
-
     d = disease.lower()
 
     if any(x in d for x in ["stress","anxiety","panic","depression"]):
         return "Psychiatrist"
-
     elif any(x in d for x in ["heart","cardio","hypertension"]):
         return "Cardiologist"
-
     elif any(x in d for x in ["lung","asthma","pneumonia","respiratory"]):
         return "Pulmonologist"
-
     elif any(x in d for x in ["brain","migraine","epilepsy","neuro"]):
         return "Neurologist"
-
     elif any(x in d for x in ["skin","acne","eczema","dermat"]):
         return "Dermatologist"
-
     elif any(x in d for x in ["kidney","urinary","bladder"]):
         return "Urologist"
-
-    elif any(x in d for x in ["pregnancy","vaginal","uterus","menstrual"]):
+    elif any(x in d for x in ["pregnancy","uterus","menstrual"]):
         return "Gynecologist"
-
     elif any(x in d for x in ["diabetes","thyroid","hormone"]):
         return "Endocrinologist"
-
     else:
         return "General Physician"
 
 # ----------------------------
 # DISTANCE FUNCTION
 # ----------------------------
-
 def calculate_distance(lat1, lon1, lat2, lon2):
-
-    lon1, lat1, lon2, lat2 = map(radians,[lon1,lat1,lon2,lat2])
-
+    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
     dlon = lon2 - lon1
     dlat = lat2 - lat1
-
     a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
     c = 2 * asin(sqrt(a))
-
-    r = 6371
-    return c*r
+    return c * 6371
 
 # ----------------------------
 # HEADER
 # ----------------------------
-
 st.markdown("""
-<div class="main-title">
-🩺 SwasthyaSathi
-</div>
-
-<div class="subtitle">
-Your AI Powered Health Assistant<br>
-Predict diseases from symptoms and find nearby hospitals instantly
-</div>
+<div class="main-title">🩺 SwasthyaSathi</div>
+<div class="subtitle">AI Health Assistant - Disease Prediction + Hospital Finder</div>
 """, unsafe_allow_html=True)
 
 # ----------------------------
-# SIDEBAR
+# SIDEBAR - DISEASE PREDICTION
 # ----------------------------
-
 st.sidebar.header("🧾 Select Symptoms")
 
-selected_symptoms = st.sidebar.multiselect(
-"Search symptoms",
-symptoms_list
-)
-
-# ----------------------------
-# DISEASE PREDICTION
-# ----------------------------
+selected_symptoms = st.sidebar.multiselect("Search symptoms", symptoms_list)
 
 if st.sidebar.button("🔍 Predict Disease"):
 
-    if len(selected_symptoms) == 0:
-
+    if not selected_symptoms:
         st.warning("Please select symptoms")
-
     else:
-
-        features = [0]*num_features
+        features = [0] * num_features
 
         for s in selected_symptoms:
-            idx = symptoms_list.index(s)
-            features[idx] = 1
+            features[symptoms_list.index(s)] = 1
 
         input_vector = csr_matrix([features])
 
         probs = clf.predict_proba(input_vector)[0]
-
         top3 = probs.argsort()[-3:][::-1]
 
         st.subheader("🧠 Possible Diseases")
 
-        col1,col2,col3 = st.columns(3)
-        cols = [col1,col2,col3]
+        cols = st.columns(3)
 
-        for i,idx in enumerate(top3):
-
+        for i, idx in enumerate(top3):
             disease = le.inverse_transform([idx])[0]
             doctor = get_specialist(disease)
 
             with cols[i]:
-
                 st.markdown(f"""
                 <div class="card">
                 <h3>🦠 {disease}</h3>
-                <p style="color:#666">Recommended Specialist</p>
-                <h4 style="color:#2C7BE5">Consult: {doctor}</h4>
+                <p>Consult: <b>{doctor}</b></p>
                 </div>
                 """, unsafe_allow_html=True)
 
 # ----------------------------
-# SEARCH HOSPITALS (FINAL FIX - DEPLOYMENT SAFE)
+# HOSPITAL INPUTS (IMPORTANT FIX)
 # ----------------------------
+st.divider()
+st.subheader("🏥 Nearby Hospitals")
 
+col1, col2 = st.columns(2)
+
+with col1:
+    location = st.text_input("Enter City", "Pune")
+
+with col2:
+    radius = st.slider("Search Radius (meters)", 1000, 10000, 3000)
+
+# ----------------------------
+# HOSPITAL SEARCH
+# ----------------------------
 if st.button("Find Hospitals"):
 
+    if not location:
+        st.error("Please enter location")
+        st.stop()
+
     try:
-        # ------------------------
-        # STEP 1: GET LAT/LON
-        # ------------------------
+        # ---------------- GEO ----------------
         geo_url = "https://nominatim.openstreetmap.org/search"
-        params = {"q": location, "format": "json"}
         headers = {"User-Agent": "SwasthyaSathi"}
 
-        geo = requests.get(geo_url, params=params, headers=headers, timeout=20)
+        geo = requests.get(
+            geo_url,
+            params={"q": location, "format": "json"},
+            headers=headers,
+            timeout=20
+        )
 
-        if geo.status_code != 200 or not geo.json():
+        geo_data = geo.json()
+
+        if not geo_data:
             st.error("Location not found")
             st.stop()
 
-        geo_data = geo.json()
         lat = float(geo_data[0]["lat"])
         lon = float(geo_data[0]["lon"])
 
-        # ------------------------
-        # STEP 2: OVERPASS QUERY (POST FIXED)
-        # ------------------------
+        # ---------------- OVERPASS ----------------
         overpass_query = f"""
         [out:json];
         node["amenity"="hospital"](around:{radius},{lat},{lon});
@@ -247,9 +208,6 @@ if st.button("Find Hospitals"):
             timeout=30
         )
 
-        # ------------------------
-        # STEP 3: SAFE RESPONSE HANDLING
-        # ------------------------
         hospital_list = []
 
         if response.status_code == 200:
@@ -264,24 +222,20 @@ if st.button("Find Hospitals"):
                     h_lat = h.get("lat")
                     h_lon = h.get("lon")
 
-                    if not h_lat or not h_lon:
-                        continue
+                    if h_lat and h_lon:
+                        distance = calculate_distance(lat, lon, h_lat, h_lon)
 
-                    distance = calculate_distance(lat, lon, h_lat, h_lon)
+                        hospital_list.append({
+                            "Hospital": name,
+                            "Distance (km)": round(distance, 2),
+                            "Latitude": h_lat,
+                            "Longitude": h_lon
+                        })
 
-                    hospital_list.append({
-                        "Hospital": name,
-                        "Distance (km)": round(distance, 2),
-                        "Latitude": h_lat,
-                        "Longitude": h_lon
-                    })
+            except:
+                pass
 
-            except Exception:
-                st.warning("Overpass API failed, using fallback data...")
-
-        # ------------------------
-        # STEP 4: FALLBACK (VERY IMPORTANT FOR STREAMLIT CLOUD)
-        # ------------------------
+        # ---------------- FALLBACK ----------------
         if not hospital_list:
             fallback = requests.get(
                 "https://nominatim.openstreetmap.org/search",
@@ -307,14 +261,12 @@ if st.button("Find Hospitals"):
                     "Longitude": h_lon
                 })
 
-        # ------------------------
-        # STEP 5: DISPLAY RESULTS
-        # ------------------------
+        # ---------------- OUTPUT ----------------
         if not hospital_list:
             st.error("No hospitals found")
             st.stop()
 
-        hospital_list = sorted(hospital_list, key=lambda x: x["Distance (km)"])
+        hospital_list.sort(key=lambda x: x["Distance (km)"])
 
         st.success(f"{len(hospital_list)} hospitals found")
 
@@ -322,13 +274,9 @@ if st.button("Find Hospitals"):
 
         st.dataframe(df[["Hospital", "Distance (km)"]], use_container_width=True)
 
-        # ------------------------
-        # GOOGLE MAPS LINKS
-        # ------------------------
         st.subheader("🚗 Directions")
 
         for h in hospital_list[:5]:
-
             link = f"https://www.google.com/maps/dir/?api=1&destination={h['Latitude']},{h['Longitude']}"
 
             st.markdown(f"""
@@ -345,9 +293,5 @@ if st.button("Find Hospitals"):
 # ----------------------------
 # DISCLAIMER
 # ----------------------------
-
 st.divider()
-
-st.warning(
-"⚠ This AI system is for educational purposes only. Always consult a doctor."
-)
+st.warning("⚠ Educational use only. Consult a doctor for medical advice.")
