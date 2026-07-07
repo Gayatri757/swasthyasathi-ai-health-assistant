@@ -7,6 +7,54 @@ from math import radians, sin, cos, sqrt, atan2
 import time
 
 # ----------------------------
+# NOMINATIM HELPERS (cached + retry-on-429)
+# ----------------------------
+
+def safe_get(url, params, headers, retries=2, backoff=1.5):
+    """GET with basic retry on 429 (rate limit) responses."""
+    last_resp = None
+    for attempt in range(retries + 1):
+        resp = requests.get(url, params=params, headers=headers, timeout=20)
+        last_resp = resp
+        if resp.status_code == 429:
+            time.sleep(backoff)
+            continue
+        resp.raise_for_status()
+        return resp
+    # If we got here, all retries hit 429 — raise the last response's error
+    last_resp.raise_for_status()
+    return last_resp
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def geocode_location(location):
+    """Geocode a city/place name to (lat, lon). Cached for 1 hour to avoid
+    re-hitting Nominatim on repeated searches for the same location."""
+    headers = {
+        "User-Agent": "SwasthyaSathi-App/1.0 (contact: gayatriadatiya344@gmail.com)"
+    }
+    resp = safe_get(
+        "https://nominatim.openstreetmap.org/search",
+        params={"q": location, "format": "json"},
+        headers=headers
+    )
+    return resp.json()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def geocode_hospital_fallback(location):
+    """Fallback hospital search via Nominatim, cached for 1 hour."""
+    headers = {
+        "User-Agent": "SwasthyaSathi-App/1.0 (contact: gayatriadatiya344@gmail.com)"
+    }
+    resp = safe_get(
+        "https://nominatim.openstreetmap.org/search",
+        params={"q": "hospital " + location, "format": "json", "limit": 10},
+        headers=headers
+    )
+    return resp.json()
+
+# ----------------------------
 # PAGE CONFIG
 # ----------------------------
 
@@ -394,21 +442,10 @@ if st.button("Find Hospitals"):
         }
 
         # ----------------------------
-        # GET LOCATION COORDINATES
+        # GET LOCATION COORDINATES (cached + retry-on-429)
         # ----------------------------
 
-        geo = requests.get(
-            "https://nominatim.openstreetmap.org/search",
-            params={
-                "q": location,
-                "format": "json"
-            },
-            headers=headers,
-            timeout=20
-        )
-
-        geo.raise_for_status()
-        geo_data = geo.json()
+        geo_data = geocode_location(location)
 
         if not geo_data:
 
@@ -483,19 +520,7 @@ if st.button("Find Hospitals"):
 
         if not hospital_list:
 
-            fallback = requests.get(
-                "https://nominatim.openstreetmap.org/search",
-                params={
-                    "q": "hospital " + location,
-                    "format": "json",
-                    "limit": 10
-                },
-                headers=headers,
-                timeout=20
-            )
-
-            fallback.raise_for_status()
-            fallback_data = fallback.json()
+            fallback_data = geocode_hospital_fallback(location)
 
             for h in fallback_data:
 
@@ -640,6 +665,17 @@ if st.button("Find Hospitals"):
             st.markdown(
                 f"[🧭 View Route on Google Maps]({route_url})"
             )
+
+    except requests.exceptions.HTTPError as e:
+
+        if e.response is not None and e.response.status_code == 429:
+            st.error(
+                "🚦 The hospital/location lookup service is rate-limiting requests right now "
+                "(too many searches in a short time). Please wait about 30-60 seconds and try again."
+            )
+        else:
+            st.error("Error fetching hospitals — the location/hospital service returned an error.")
+            st.write(str(e))
 
     except requests.exceptions.RequestException as e:
 
