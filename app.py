@@ -87,12 +87,17 @@ border-right:1px solid #eee;
 """, unsafe_allow_html=True)
 
 # ----------------------------
-# LOAD MODELS
+# LOAD MODELS (CACHED — fixes memory crash from reloading on every rerun)
 # ----------------------------
 
-clf = joblib.load("disease_model.pkl")
-le = joblib.load("label_encoder.pkl")
-symptoms_list = joblib.load("symptoms_list.pkl")
+@st.cache_resource
+def load_models():
+    clf = joblib.load("disease_model.pkl")
+    le = joblib.load("label_encoder.pkl")
+    symptoms_list = joblib.load("symptoms_list.pkl")
+    return clf, le, symptoms_list
+
+clf, le, symptoms_list = load_models()
 
 num_features = len(symptoms_list)
 
@@ -276,15 +281,16 @@ if st.sidebar.button("🔍 Predict Disease"):
 
         probs = clf.predict_proba(input_vector)[0]
 
-        top2 = probs.argsort()[-2:][::-1]
+        top_n = min(3, len(probs))
+        top_indices = probs.argsort()[-top_n:][::-1]
 
         st.subheader("🧠 Possible Diseases")
 
-        col1, col2 = st.columns(2)
+        cols = st.columns(top_n)
 
-        cols = [col1, col2]
+        max_severity = 0
 
-        for i, idx in enumerate(top2):
+        for i, idx in enumerate(top_indices):
 
             disease = le.inverse_transform([idx])[0]
 
@@ -294,6 +300,8 @@ if st.sidebar.button("🔍 Predict Disease"):
                 selected_symptoms,
                 disease
             )
+
+            max_severity = max(max_severity, severity_score)
 
             risk_level = get_risk_level(severity_score)
 
@@ -326,16 +334,16 @@ if st.sidebar.button("🔍 Predict Disease"):
                 """, unsafe_allow_html=True)
 
         # ----------------------------
-        # ALERTS
+        # ALERTS (based on highest severity across shown diseases)
         # ----------------------------
 
-        if severity_score >= 70:
+        if max_severity >= 70:
 
             st.error(
                 "🚨 HIGH RISK DETECTED - Immediate medical attention recommended"
             )
 
-        elif severity_score >= 40:
+        elif max_severity >= 40:
 
             st.warning(
                 "⚠ Moderate severity detected. Consult doctor soon."
@@ -379,8 +387,10 @@ if st.button("Find Hospitals"):
 
     try:
 
+        # Nominatim requires a descriptive User-Agent with contact info,
+        # or it silently blocks/rate-limits requests from cloud hosts.
         headers = {
-            "User-Agent": "SwasthyaSathi"
+            "User-Agent": "SwasthyaSathi-App/1.0 (contact: gayatriadatiya344@gmail.com)"
         }
 
         # ----------------------------
@@ -397,6 +407,7 @@ if st.button("Find Hospitals"):
             timeout=20
         )
 
+        geo.raise_for_status()
         geo_data = geo.json()
 
         if not geo_data:
@@ -418,20 +429,20 @@ if st.button("Find Hospitals"):
         out;
         """
 
-        response = requests.post(
-            "https://overpass-api.de/api/interpreter",
-            data={"data": query},
-            timeout=30
-        )
-
         hospital_list = []
 
-        if response.status_code == 200:
+        try:
 
-            try:
+            response = requests.post(
+                "https://overpass-api.de/api/interpreter",
+                data={"data": query},
+                headers=headers,
+                timeout=30
+            )
+
+            if response.status_code == 200:
 
                 data = response.json()
-
                 hospitals = data.get("elements", [])
 
                 for h in hospitals:
@@ -463,10 +474,8 @@ if st.button("Find Hospitals"):
                         "Longitude": lon
                     })
 
-            except:
-                st.warning(
-                    "Using fallback hospital search..."
-                )
+        except requests.exceptions.RequestException:
+            st.info("Overpass search unavailable, using fallback search...")
 
         # ----------------------------
         # FALLBACK SEARCH
@@ -485,6 +494,7 @@ if st.button("Find Hospitals"):
                 timeout=20
             )
 
+            fallback.raise_for_status()
             fallback_data = fallback.json()
 
             for h in fallback_data:
@@ -631,10 +641,14 @@ if st.button("Find Hospitals"):
                 f"[🧭 View Route on Google Maps]({route_url})"
             )
 
+    except requests.exceptions.RequestException as e:
+
+        st.error("Error fetching hospitals — the location/hospital service may be temporarily unavailable.")
+        st.write(str(e))
+
     except Exception as e:
 
-        st.error("Error fetching hospitals")
-
+        st.error("Unexpected error while fetching hospitals")
         st.write(str(e))
 
 # ----------------------------
