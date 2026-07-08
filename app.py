@@ -5,6 +5,22 @@ import pandas as pd
 from scipy.sparse import csr_matrix
 from math import radians, sin, cos, sqrt, atan2
 import time
+import json
+from groq import Groq
+
+# ----------------------------
+# GEN AI CLIENT (CACHED) — Groq: free tier, no credit card required
+# ----------------------------
+
+@st.cache_resource
+def get_ai_client():
+    api_key = st.secrets.get("GROQ_API_KEY", None)
+    if not api_key:
+        return None
+    return Groq(api_key=api_key)
+
+ai_client = get_ai_client()
+AI_MODEL = "llama-3.3-70b-versatile"
 
 # ----------------------------
 # NOMINATIM HELPERS (cached + retry-on-429)
@@ -150,6 +166,108 @@ clf, le, symptoms_list = load_models()
 num_features = len(symptoms_list)
 
 # ----------------------------
+# GEN AI: EXTRACT SYMPTOMS FROM FREE TEXT
+# ----------------------------
+
+def ai_extract_symptoms(user_text, symptoms_list):
+    """Use Claude to map a free-text description to entries in symptoms_list."""
+    if ai_client is None:
+        return [], "AI features are not configured (missing API key)."
+
+    prompt = f"""You are a medical symptom-matching assistant. A user described their
+symptoms in their own words. Match their description to entries from this
+exact list of known symptoms (only use exact strings from the list, do not
+invent new ones):
+
+{json.dumps(symptoms_list)}
+
+User's description: "{user_text}"
+
+Return ONLY a JSON array of matching strings from the list, nothing else.
+If nothing matches, return an empty array []."""
+
+    try:
+        response = ai_client.chat.completions.create(
+            model=AI_MODEL,
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        text = response.choices[0].message.content.strip()
+        text = text.replace("```json", "").replace("```", "").strip()
+        matched = json.loads(text)
+        matched = [s for s in matched if s in symptoms_list]
+        return matched, None
+    except Exception as e:
+        return [], f"Could not process with AI: {e}"
+
+
+# ----------------------------
+# GEN AI: NATURAL-LANGUAGE RESULT SUMMARY
+# ----------------------------
+
+def ai_generate_summary(disease_results):
+    """Generate a friendly, plain-language summary of the prediction results."""
+    if ai_client is None:
+        return None
+
+    results_text = "\n".join([
+        f"- {d['disease']}: severity {d['severity']}/100 ({d['risk']}), "
+        f"recommended specialist: {d['doctor']}"
+        for d in disease_results
+    ])
+
+    prompt = f"""You are a calm, clear health assistant (not a doctor). Based on
+this AI model's output, write a short (4-6 sentence) plain-language summary
+for the user. Explain what the results suggest in simple terms, give general
+non-prescriptive precautions, and remind them this is not a diagnosis and they
+should consult a real doctor for confirmation. Do not invent new medical facts
+beyond what's given.
+
+Model output:
+{results_text}"""
+
+    try:
+        response = ai_client.chat.completions.create(
+            model=AI_MODEL,
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"(AI summary unavailable: {e})"
+
+
+# ----------------------------
+# GEN AI: FOLLOW-UP CHAT
+# ----------------------------
+
+def ai_chat_reply(chat_history, context):
+    """Generate a chat reply grounded in the current prediction context."""
+    if ai_client is None:
+        return "AI chat is not configured (missing API key)."
+
+    system_prompt = f"""You are a calm, helpful health information assistant
+embedded in an app called SwasthyaSathi. You are NOT a doctor and must never
+give a definitive diagnosis or prescribe medication. Always recommend
+consulting a real doctor for anything serious. Keep answers short (3-5
+sentences) and easy to understand.
+
+Context from the user's recent symptom check: {context}"""
+
+    messages = [{"role": "system", "content": system_prompt}]
+    messages += [{"role": m["role"], "content": m["content"]} for m in chat_history]
+
+    try:
+        response = ai_client.chat.completions.create(
+            model=AI_MODEL,
+            max_tokens=400,
+            messages=messages
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"(AI chat unavailable: {e})"
+
+# ----------------------------
 # SPECIALIST DETECTION
 # ----------------------------
 
@@ -183,6 +301,60 @@ def get_specialist(disease):
 
     else:
         return "General Physician"
+
+# ----------------------------
+# DOCTOR DIRECTORY (SIMULATED DATA)
+# ----------------------------
+# NOTE: This is demo/mock data for portfolio purposes — not a real doctor
+# network, live availability system, or payment gateway.
+
+DOCTOR_DIRECTORY = {
+    "General Physician": [
+        {"name": "Dr. Anjali Deshmukh", "rating": 4.7, "reviews": 312, "experience": 9, "fee": 400},
+        {"name": "Dr. Rohan Kulkarni", "rating": 4.5, "reviews": 198, "experience": 6, "fee": 300},
+        {"name": "Dr. Sunita Patil", "rating": 4.8, "reviews": 456, "experience": 14, "fee": 500},
+    ],
+    "Psychiatrist": [
+        {"name": "Dr. Meera Nair", "rating": 4.9, "reviews": 521, "experience": 12, "fee": 800},
+        {"name": "Dr. Karan Malhotra", "rating": 4.6, "reviews": 214, "experience": 7, "fee": 650},
+        {"name": "Dr. Priya Shah", "rating": 4.7, "reviews": 289, "experience": 10, "fee": 700},
+    ],
+    "Cardiologist": [
+        {"name": "Dr. Vikram Rao", "rating": 4.8, "reviews": 401, "experience": 16, "fee": 900},
+        {"name": "Dr. Neha Joshi", "rating": 4.6, "reviews": 178, "experience": 8, "fee": 750},
+    ],
+    "Pulmonologist": [
+        {"name": "Dr. Sameer Khan", "rating": 4.7, "reviews": 233, "experience": 11, "fee": 700},
+        {"name": "Dr. Ayesha Sheikh", "rating": 4.5, "reviews": 156, "experience": 7, "fee": 600},
+    ],
+    "Neurologist": [
+        {"name": "Dr. Arvind Menon", "rating": 4.9, "reviews": 367, "experience": 15, "fee": 950},
+        {"name": "Dr. Kavita Iyer", "rating": 4.6, "reviews": 201, "experience": 9, "fee": 800},
+    ],
+    "Dermatologist": [
+        {"name": "Dr. Riya Kapoor", "rating": 4.7, "reviews": 289, "experience": 8, "fee": 500},
+        {"name": "Dr. Aditya Verma", "rating": 4.5, "reviews": 145, "experience": 6, "fee": 450},
+    ],
+    "Urologist": [
+        {"name": "Dr. Nikhil Bhatt", "rating": 4.6, "reviews": 167, "experience": 10, "fee": 700},
+    ],
+    "Gynecologist": [
+        {"name": "Dr. Shalini Reddy", "rating": 4.8, "reviews": 398, "experience": 13, "fee": 650},
+        {"name": "Dr. Pooja Agarwal", "rating": 4.7, "reviews": 245, "experience": 9, "fee": 600},
+    ],
+    "Endocrinologist": [
+        {"name": "Dr. Manish Gupta", "rating": 4.7, "reviews": 210, "experience": 11, "fee": 750},
+    ],
+}
+
+
+def get_doctors_for_specialist(specialist):
+    return DOCTOR_DIRECTORY.get(specialist, DOCTOR_DIRECTORY["General Physician"])
+
+
+def star_display(rating):
+    full_stars = int(rating)
+    return "⭐" * full_stars + f" {rating}"
 
 # ----------------------------
 # SEVERITY SCORE
@@ -302,9 +474,39 @@ Predict diseases, analyze severity and find nearby hospitals
 
 st.sidebar.header("🧾 Select Symptoms")
 
+if "ai_matched_symptoms" not in st.session_state:
+    st.session_state.ai_matched_symptoms = []
+
+st.sidebar.markdown("**🤖 Describe symptoms in your own words**")
+free_text_input = st.sidebar.text_area(
+    "e.g. \"I've had a bad headache and feel dizzy for two days\"",
+    key="free_text_symptoms",
+    height=80
+)
+
+if st.sidebar.button("✨ Extract Symptoms with AI"):
+    if not free_text_input.strip():
+        st.sidebar.warning("Please describe your symptoms first.")
+    elif ai_client is None:
+        st.sidebar.error("AI features need a GROQ_API_KEY set in Streamlit secrets.")
+    else:
+        with st.sidebar:
+            with st.spinner("Analyzing your description..."):
+                matched, err = ai_extract_symptoms(free_text_input, symptoms_list)
+        if err:
+            st.sidebar.error(err)
+        elif not matched:
+            st.sidebar.info("No matching symptoms found — try adding more detail, or select manually below.")
+        else:
+            st.session_state.ai_matched_symptoms = matched
+            st.sidebar.success(f"Matched: {', '.join(matched)}")
+
+st.sidebar.markdown("**Or select manually**")
+
 selected_symptoms = st.sidebar.multiselect(
     "Search symptoms",
-    symptoms_list
+    symptoms_list,
+    default=st.session_state.ai_matched_symptoms
 )
 
 # ----------------------------
@@ -337,6 +539,7 @@ if st.sidebar.button("🔍 Predict Disease"):
         cols = st.columns(top_n)
 
         max_severity = 0
+        disease_results = []
 
         for i, idx in enumerate(top_indices):
 
@@ -352,6 +555,13 @@ if st.sidebar.button("🔍 Predict Disease"):
             max_severity = max(max_severity, severity_score)
 
             risk_level = get_risk_level(severity_score)
+
+            disease_results.append({
+                "disease": disease,
+                "doctor": doctor,
+                "severity": severity_score,
+                "risk": risk_level
+            })
 
             with cols[i]:
 
@@ -402,6 +612,147 @@ if st.sidebar.button("🔍 Predict Disease"):
             st.success(
                 "🟢 Low severity detected."
             )
+
+        # ----------------------------
+        # GEN AI: NATURAL-LANGUAGE SUMMARY
+        # ----------------------------
+
+        st.subheader("💬 AI Summary")
+
+        if ai_client is None:
+            st.info(
+                "Add a GROQ_API_KEY in Streamlit secrets to enable "
+                "AI-generated plain-language summaries and chat."
+            )
+        else:
+            with st.spinner("Generating a plain-language summary..."):
+                ai_summary = ai_generate_summary(disease_results)
+            st.info(ai_summary)
+
+        # Save context so the follow-up chat below is grounded in this result
+        st.session_state.last_prediction_context = (
+            f"Symptoms reported: {', '.join(selected_symptoms)}. "
+            + "; ".join([
+                f"{d['disease']} (severity {d['severity']}/100, {d['risk']}, "
+                f"see a {d['doctor']})" for d in disease_results
+            ])
+        )
+
+        # Save results so the doctor-booking section (outside this button's
+        # scope) can access them on the next rerun
+        st.session_state.last_disease_results = disease_results
+
+# ----------------------------
+# BOOK ONLINE CONSULTATION
+# ----------------------------
+
+st.divider()
+st.subheader("👨‍⚕️ Book Online Consultation")
+st.caption("Demo booking flow — doctor profiles and availability shown here are simulated for demonstration purposes.")
+
+if "bookings" not in st.session_state:
+    st.session_state.bookings = []
+
+recent_results = st.session_state.get("last_disease_results", [])
+
+if not recent_results:
+    st.info("Run a symptom prediction above to see recommended specialists here.")
+else:
+    recommended_specialists = list(dict.fromkeys([d["doctor"] for d in recent_results]))
+
+    specialist_tabs = st.tabs(recommended_specialists)
+
+    for tab, specialist in zip(specialist_tabs, recommended_specialists):
+        with tab:
+            doctors = get_doctors_for_specialist(specialist)
+
+            for doc in doctors:
+                with st.container():
+                    dcol1, dcol2, dcol3 = st.columns([3, 2, 2])
+
+                    with dcol1:
+                        st.markdown(f"**{doc['name']}**")
+                        st.caption(f"{specialist} · {doc['experience']} yrs experience")
+
+                    with dcol2:
+                        st.markdown(f"{star_display(doc['rating'])}")
+                        st.caption(f"{doc['reviews']} reviews")
+
+                    with dcol3:
+                        st.markdown(f"**₹{doc['fee']}** / consultation")
+
+                    booking_key = f"book_{specialist}_{doc['name']}"
+
+                    with st.expander(f"📅 Book with {doc['name']}"):
+                        b_date = st.date_input("Preferred date", key=f"date_{booking_key}")
+                        b_time = st.selectbox(
+                            "Preferred time slot",
+                            ["10:00 AM", "12:00 PM", "3:00 PM", "5:00 PM", "7:00 PM"],
+                            key=f"time_{booking_key}"
+                        )
+
+                        if st.button(f"Confirm Booking (₹{doc['fee']})", key=f"confirm_{booking_key}"):
+                            booking_id = f"SS-{len(st.session_state.bookings) + 1001}"
+                            st.session_state.bookings.append({
+                                "id": booking_id,
+                                "doctor": doc["name"],
+                                "specialist": specialist,
+                                "date": str(b_date),
+                                "time": b_time,
+                                "fee": doc["fee"]
+                            })
+                            st.success(
+                                f"✅ Appointment confirmed with {doc['name']} on "
+                                f"{b_date} at {b_time}. Booking ID: {booking_id}"
+                            )
+
+                    st.markdown("---")
+
+    if st.session_state.bookings:
+        with st.expander(f"📋 My Bookings ({len(st.session_state.bookings)})"):
+            for b in st.session_state.bookings:
+                st.markdown(
+                    f"**{b['id']}** — {b['doctor']} ({b['specialist']}) · "
+                    f"{b['date']} at {b['time']} · ₹{b['fee']}"
+                )
+
+# ----------------------------
+# GEN AI: FOLLOW-UP CHAT
+# ----------------------------
+
+st.divider()
+st.subheader("🤖 Ask Follow-up Questions")
+
+if "chat_messages" not in st.session_state:
+    st.session_state.chat_messages = []
+
+if ai_client is None:
+    st.caption("Add a GROQ_API_KEY in Streamlit secrets to enable this chat.")
+else:
+    st.caption("Ask general questions about your results — e.g. \"What does acute stress reaction mean?\"")
+
+    for msg in st.session_state.chat_messages:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
+
+    user_question = st.chat_input("Type your question here...")
+
+    if user_question:
+        st.session_state.chat_messages.append({"role": "user", "content": user_question})
+        with st.chat_message("user"):
+            st.write(user_question)
+
+        context = st.session_state.get(
+            "last_prediction_context",
+            "No prediction has been run yet in this session."
+        )
+
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                reply = ai_chat_reply(st.session_state.chat_messages, context)
+            st.write(reply)
+
+        st.session_state.chat_messages.append({"role": "assistant", "content": reply})
 
 # ----------------------------
 # HOSPITAL FINDER
