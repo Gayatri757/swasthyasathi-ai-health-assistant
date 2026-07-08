@@ -1,123 +1,118 @@
-# swasthyasathi-ai-health-assistant
-AI-powered health assistant that predicts possible diseases from user symptoms and helps users find nearby hospitals
+# 🩺 SwasthyaSathi — AI-Powered Health Assistant
 
-# 🩺 SwasthyaSathi – AI Powered Health Assistant
+SwasthyaSathi predicts likely diseases from user-reported symptoms, explains results in plain language, estimates severity/urgency, helps users book a consultation, and finds nearby hospitals in real time.
 
-SwasthyaSathi is a Machine Learning based healthcare assistant that predicts possible diseases based on user-selected symptoms and helps users locate nearby hospitals.
+**🔗 Live App:** https://swasthyasathi-ai-health-assistant.streamlit.app/
 
-The system is designed to provide **early health awareness and guidance**, especially for people in rural or remote areas where immediate medical consultation may not be available.
-
----
-
-## 🚀 Features
-
-- Symptom-based disease prediction using Machine Learning
-- Displays **Top 3 possible diseases**
-- Recommends the **appropriate medical specialist**
-- Finds **nearby hospitals based on user location**
-- Provides **Google Maps navigation links**
-- Simple and user-friendly interface built with Streamlit
+> ⚠️ **Disclaimer:** This is an educational/portfolio project, not a medical device. Predictions, severity scores, doctor profiles, and booking are for demonstration purposes and should never replace professional medical advice.
 
 ---
 
-## 🧠 How It Works
+## ✨ Features
 
-1. The user selects symptoms from the interface.
-2. Symptoms are converted into a binary feature vector.
-3. A trained **SGDClassifier machine learning model** predicts possible diseases.
-4. The system displays the **Top 3 predicted diseases**.
-5. Each disease is mapped to the **appropriate medical specialist**.
-6. Using **OpenStreetMap APIs**, nearby hospitals are located within a selected radius.
+### Core ML Pipeline
+- **Disease prediction** using an `SGDClassifier` trained on 246,945 medical records, achieving **87% accuracy** — outperforming a Random Forest baseline (39%).
+- **Specialist recommendation** — maps predicted conditions to the right type of doctor (Cardiologist, Psychiatrist, Dermatologist, etc.).
+- **Severity scoring (0–100) and risk classification** (🟢 Low / 🟡 Medium / 🔴 High) with real-time alerts on next steps.
 
----
+### Generative AI Layer (Llama 3.3 via Groq — free tier)
+- **Natural-language symptom intake** — describe symptoms in plain English (e.g. *"I've had a headache and feel dizzy for two days"*) and the AI extracts and matches them to the model's known symptom list, then runs prediction automatically in the same step.
+- **AI-generated result summaries** — a plain-language explanation of the prediction, generated per-request rather than a static template.
+- **Context-aware follow-up chat** — ask questions like *"what does acute stress reaction mean?"* and get answers grounded in your actual results.
 
-## 🛠️ Technologies Used
+### Doctor Booking (Simulated)
+- Browse doctors by recommended specialist, with ratings, review counts, experience, and consultation fees.
+- Book a demo appointment (date + time slot) and view a simulated booking confirmation with a generated booking ID.
+- *Note: doctor profiles, fees, and availability are mock data for demonstration — there is no real payment gateway or live doctor network.*
 
-- Python
-- Streamlit
-- Scikit-learn
-- Pandas
-- SciPy
-- OpenStreetMap API
-- Overpass API
-- Machine Learning (SGDClassifier)
-
----
-
-## 📊 Dataset
-
-The model was trained on a dataset containing:
-
-- **246,945 rows**
-- **378 columns**
-- **377 symptoms**
-- **1 disease label**
-
-The dataset represents symptom-disease relationships used to train the prediction model.
+### Hospital Finder
+- Enter a city and search radius to find nearby hospitals via the **Overpass API** (OpenStreetMap), with fallback search via Nominatim if Overpass is unavailable.
+- View results on an interactive map, get sorted distances, and open turn-by-turn directions in Google Maps.
+- Simulated emergency ambulance dispatch flow with ETA estimate.
 
 ---
 
-## 🏥 Hospital Finder
+## 🛠️ Tech Stack
 
-The system integrates **Overpass API** to locate nearby hospitals based on the user’s entered location and selected search radius.
-
-Users can directly open navigation using **Google Maps directions**.
-
----
-
-## 📂 Project Structure
-swasthyasathi-ai-health-assistant
-│
-├── app.py
-├── disease_model.pkl
-├── label_encoder.pkl
-├── symptoms_list.pkl
-├── requirements.txt
-└── README.md
-
-## ⚙️ Installation
-
-Clone the repository:
-
-
-git clone https://github.com/Gayatri757/swasthyasathi-ai-health-assistant.git
-
-Install dependencies:
-
-
-pip install -r requirements.txt
-
-
-Run the application:
-
-
-streamlit run app.py
-
+| Layer | Technology |
+|---|---|
+| ML Model | Scikit-learn (`SGDClassifier`), joblib |
+| GenAI | Groq API (Llama 3.3 70B) |
+| Frontend / App | Streamlit |
+| Geolocation & Maps | Nominatim, Overpass API, Google Maps (directions) |
+| Data | NumPy, Pandas, SciPy (sparse matrices) |
 
 ---
 
-## 🌍 Future Scope
+## 🚀 Running Locally
 
-- Integration with real healthcare databases
-- Doctor appointment booking system
-- Real-time telemedicine consultation
-- Mobile application version
-- Integration with wearable health devices
+1. **Clone the repo**
+   ```bash
+   git clone https://github.com/Gayatri757/swasthyasathi-ai-health-assistant.git
+   cd swasthyasathi-ai-health-assistant
+   ```
+
+2. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Add your free Groq API key**
+
+   Create `.streamlit/secrets.toml` (already gitignored — never commit this file):
+   ```toml
+   GROQ_API_KEY = "your-groq-key-here"
+   ```
+   Get a free key (no credit card required) at [console.groq.com](https://console.groq.com).
+
+4. **Run the app**
+   ```bash
+   streamlit run app.py
+   ```
 
 ---
 
-## ⚠️ Disclaimer
+## 📂 Model Files
 
-This project is for **educational and research purposes only**.  
-It is not intended to replace professional medical advice, diagnosis, or treatment.
-
-Always consult a qualified healthcare professional for medical concerns.
+The app expects these pre-trained artifacts in the project root:
+- `disease_model.pkl` — trained `SGDClassifier`
+- `label_encoder.pkl` — `LabelEncoder` for disease labels
+- `symptoms_list.pkl` — ordered list of known symptom strings used as model features
 
 ---
 
-## 👩‍💻 Author
+## 🧭 How It Works (High Level)
 
-**Gayatri Adatiya**
+```
+User Input (free text OR manual symptom selection)
+        │
+        ▼
+[GenAI: symptom extraction]  ──(if free text)──▶  matched symptoms
+        │
+        ▼
+Feature vector → SGDClassifier → Top-3 predicted diseases
+        │
+        ▼
+Severity scoring + specialist mapping
+        │
+        ▼
+[GenAI: plain-language summary]  +  [GenAI: follow-up chat]
+        │
+        ▼
+Doctor booking (simulated)  +  Nearby hospital search (Overpass/Nominatim)
+```
 
-AI & Data Science Student
+---
 
+## 🔭 Possible Future Improvements
+
+- Replace mock doctor directory with a real practitioner database
+- Add multi-language support for symptom input
+- Voice-based symptom input (speech-to-text)
+- Persist booking history and prediction logs per user (currently session-only)
+
+---
+
+## 📄 License
+
+This project is for educational and portfolio purposes.
