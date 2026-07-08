@@ -474,8 +474,8 @@ Predict diseases, analyze severity and find nearby hospitals
 
 st.sidebar.header("🧾 Select Symptoms")
 
-if "ai_matched_symptoms" not in st.session_state:
-    st.session_state.ai_matched_symptoms = []
+if "selected_symptoms_ms" not in st.session_state:
+    st.session_state.selected_symptoms_ms = []
 
 st.sidebar.markdown("**🤖 Describe symptoms in your own words**")
 free_text_input = st.sidebar.text_area(
@@ -498,7 +498,7 @@ if st.sidebar.button("✨ Extract Symptoms with AI"):
         elif not matched:
             st.sidebar.info("No matching symptoms found — try adding more detail, or select manually below.")
         else:
-            st.session_state.ai_matched_symptoms = matched
+            st.session_state.selected_symptoms_ms = matched
             st.sidebar.success(f"Matched: {', '.join(matched)}")
 
 st.sidebar.markdown("**Or select manually**")
@@ -506,7 +506,7 @@ st.sidebar.markdown("**Or select manually**")
 selected_symptoms = st.sidebar.multiselect(
     "Search symptoms",
     symptoms_list,
-    default=st.session_state.ai_matched_symptoms
+    key="selected_symptoms_ms"
 )
 
 # ----------------------------
