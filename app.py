@@ -477,6 +477,97 @@ st.sidebar.header("🧾 Select Symptoms")
 if "selected_symptoms_ms" not in st.session_state:
     st.session_state.selected_symptoms_ms = []
 
+if "run_prediction_now" not in st.session_state:
+    st.session_state.run_prediction_now = False
+
+if "prediction_symptoms" not in st.session_state:
+    st.session_state.prediction_symptoms = []
+
+
+def run_prediction(symptoms_for_prediction):
+    """Runs the full disease prediction + severity + AI summary pipeline
+    for a given list of symptoms, and renders the results."""
+
+    if len(symptoms_for_prediction) == 0:
+        st.warning("Please select or describe at least one symptom.")
+        return
+
+    features = [0] * num_features
+
+    for s in symptoms_for_prediction:
+        idx = symptoms_list.index(s)
+        features[idx] = 1
+
+    input_vector = csr_matrix([features])
+
+    probs = clf.predict_proba(input_vector)[0]
+
+    top_n = min(3, len(probs))
+    top_indices = probs.argsort()[-top_n:][::-1]
+
+    st.subheader("🧠 Possible Diseases")
+
+    cols = st.columns(top_n)
+
+    max_severity = 0
+    disease_results = []
+
+    for i, idx in enumerate(top_indices):
+
+        disease = le.inverse_transform([idx])[0]
+        doctor = get_specialist(disease)
+        severity_score = calculate_severity(symptoms_for_prediction, disease)
+        max_severity = max(max_severity, severity_score)
+        risk_level = get_risk_level(severity_score)
+
+        disease_results.append({
+            "disease": disease,
+            "doctor": doctor,
+            "severity": severity_score,
+            "risk": risk_level
+        })
+
+        with cols[i]:
+            st.markdown(f"""
+            <div class="card">
+            <h3>🦠 {disease}</h3>
+            <p style="color:#666">Recommended Specialist</p>
+            <h4 style="color:#2C7BE5">Consult: {doctor}</h4>
+            <hr>
+            <h4>🧠 Severity Score: {severity_score}/100</h4>
+            <h4>⚠ {risk_level}</h4>
+            </div>
+            """, unsafe_allow_html=True)
+
+    if max_severity >= 70:
+        st.error("🚨 HIGH RISK DETECTED - Immediate medical attention recommended")
+    elif max_severity >= 40:
+        st.warning("⚠ Moderate severity detected. Consult doctor soon.")
+    else:
+        st.success("🟢 Low severity detected.")
+
+    st.subheader("💬 AI Summary")
+
+    if ai_client is None:
+        st.info(
+            "Add a GROQ_API_KEY in Streamlit secrets to enable "
+            "AI-generated plain-language summaries and chat."
+        )
+    else:
+        with st.spinner("Generating a plain-language summary..."):
+            ai_summary = ai_generate_summary(disease_results)
+        st.info(ai_summary)
+
+    st.session_state.last_prediction_context = (
+        f"Symptoms reported: {', '.join(symptoms_for_prediction)}. "
+        + "; ".join([
+            f"{d['disease']} (severity {d['severity']}/100, {d['risk']}, "
+            f"see a {d['doctor']})" for d in disease_results
+        ])
+    )
+    st.session_state.last_disease_results = disease_results
+
+
 st.sidebar.markdown("**🤖 Describe symptoms in your own words**")
 free_text_input = st.sidebar.text_area(
     "e.g. \"I've had a bad headache and feel dizzy for two days\"",
@@ -484,7 +575,7 @@ free_text_input = st.sidebar.text_area(
     height=80
 )
 
-if st.sidebar.button("✨ Extract Symptoms with AI"):
+if st.sidebar.button("✨ Analyze My Symptoms (AI)"):
     if not free_text_input.strip():
         st.sidebar.warning("Please describe your symptoms first.")
     elif ai_client is None:
@@ -500,6 +591,9 @@ if st.sidebar.button("✨ Extract Symptoms with AI"):
         else:
             st.session_state.selected_symptoms_ms = matched
             st.sidebar.success(f"Matched: {', '.join(matched)}")
+            # Trigger prediction immediately — no second click needed
+            st.session_state.run_prediction_now = True
+            st.session_state.prediction_symptoms = matched
 
 st.sidebar.markdown("**Or select manually**")
 
@@ -509,138 +603,16 @@ selected_symptoms = st.sidebar.multiselect(
     key="selected_symptoms_ms"
 )
 
-# ----------------------------
-# DISEASE PREDICTION
-# ----------------------------
-
 if st.sidebar.button("🔍 Predict Disease"):
+    st.session_state.run_prediction_now = True
+    st.session_state.prediction_symptoms = selected_symptoms
 
-    if len(selected_symptoms) == 0:
+# ----------------------------
+# RUN PREDICTION (triggered by either button above)
+# ----------------------------
 
-        st.warning("Please select symptoms")
-
-    else:
-
-        features = [0] * num_features
-
-        for s in selected_symptoms:
-            idx = symptoms_list.index(s)
-            features[idx] = 1
-
-        input_vector = csr_matrix([features])
-
-        probs = clf.predict_proba(input_vector)[0]
-
-        top_n = min(3, len(probs))
-        top_indices = probs.argsort()[-top_n:][::-1]
-
-        st.subheader("🧠 Possible Diseases")
-
-        cols = st.columns(top_n)
-
-        max_severity = 0
-        disease_results = []
-
-        for i, idx in enumerate(top_indices):
-
-            disease = le.inverse_transform([idx])[0]
-
-            doctor = get_specialist(disease)
-
-            severity_score = calculate_severity(
-                selected_symptoms,
-                disease
-            )
-
-            max_severity = max(max_severity, severity_score)
-
-            risk_level = get_risk_level(severity_score)
-
-            disease_results.append({
-                "disease": disease,
-                "doctor": doctor,
-                "severity": severity_score,
-                "risk": risk_level
-            })
-
-            with cols[i]:
-
-                st.markdown(f"""
-                <div class="card">
-
-                <h3>🦠 {disease}</h3>
-
-                <p style="color:#666">
-                Recommended Specialist
-                </p>
-
-                <h4 style="color:#2C7BE5">
-                Consult: {doctor}
-                </h4>
-
-                <hr>
-
-                <h4>
-                🧠 Severity Score: {severity_score}/100
-                </h4>
-
-                <h4>
-                ⚠ {risk_level}
-                </h4>
-
-                </div>
-                """, unsafe_allow_html=True)
-
-        # ----------------------------
-        # ALERTS (based on highest severity across shown diseases)
-        # ----------------------------
-
-        if max_severity >= 70:
-
-            st.error(
-                "🚨 HIGH RISK DETECTED - Immediate medical attention recommended"
-            )
-
-        elif max_severity >= 40:
-
-            st.warning(
-                "⚠ Moderate severity detected. Consult doctor soon."
-            )
-
-        else:
-
-            st.success(
-                "🟢 Low severity detected."
-            )
-
-        # ----------------------------
-        # GEN AI: NATURAL-LANGUAGE SUMMARY
-        # ----------------------------
-
-        st.subheader("💬 AI Summary")
-
-        if ai_client is None:
-            st.info(
-                "Add a GROQ_API_KEY in Streamlit secrets to enable "
-                "AI-generated plain-language summaries and chat."
-            )
-        else:
-            with st.spinner("Generating a plain-language summary..."):
-                ai_summary = ai_generate_summary(disease_results)
-            st.info(ai_summary)
-
-        # Save context so the follow-up chat below is grounded in this result
-        st.session_state.last_prediction_context = (
-            f"Symptoms reported: {', '.join(selected_symptoms)}. "
-            + "; ".join([
-                f"{d['disease']} (severity {d['severity']}/100, {d['risk']}, "
-                f"see a {d['doctor']})" for d in disease_results
-            ])
-        )
-
-        # Save results so the doctor-booking section (outside this button's
-        # scope) can access them on the next rerun
-        st.session_state.last_disease_results = disease_results
+if st.session_state.run_prediction_now:
+    run_prediction(st.session_state.prediction_symptoms)
 
 # ----------------------------
 # BOOK ONLINE CONSULTATION
