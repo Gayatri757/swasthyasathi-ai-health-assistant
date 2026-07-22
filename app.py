@@ -515,6 +515,7 @@ def run_prediction(symptoms_for_prediction):
     for i, idx in enumerate(top_indices):
 
         disease = le.inverse_transform([idx])[0]
+        confidence = probs[idx] * 100
         doctor = get_specialist(disease)
         severity_score = calculate_severity(symptoms_for_prediction, disease)
         max_severity = max(max_severity, severity_score)
@@ -524,7 +525,8 @@ def run_prediction(symptoms_for_prediction):
             "disease": disease,
             "doctor": doctor,
             "severity": severity_score,
-            "risk": risk_level
+            "risk": risk_level,
+            "confidence": confidence
         })
 
         with cols[i]:
@@ -534,10 +536,12 @@ def run_prediction(symptoms_for_prediction):
             <p style="color:#666">Recommended Specialist</p>
             <h4 style="color:#2C7BE5">Consult: {doctor}</h4>
             <hr>
+            <h4>🎯 Confidence: {confidence:.1f}%</h4>
             <h4>🧠 Severity Score: {severity_score}/100</h4>
             <h4>⚠ {risk_level}</h4>
             </div>
             """, unsafe_allow_html=True)
+            st.progress(min(int(confidence), 100))
 
     if max_severity >= 70:
         st.error("🚨 HIGH RISK DETECTED - Immediate medical attention recommended")
