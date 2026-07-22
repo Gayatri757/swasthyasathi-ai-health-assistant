@@ -11,7 +11,7 @@ SwasthyaSathi predicts likely diseases from user-reported symptoms, explains res
 ## ✨ Features
 
 ### Core ML Pipeline
-- **Disease prediction** using an `SGDClassifier` trained on 246,945 medical records, achieving **87% accuracy** — outperforming a Random Forest baseline (39%).
+- **Disease prediction** using a class-weighted `XGBClassifier`, trained on 246,945 medical records (587 diseases after deduplication and rare-class filtering), achieving **93.8% top-3 accuracy** (81.5% top-1) — benchmarked against SGDClassifier (79.4% top-1) and Random Forest (71.2% top-1) baselines on the same stratified, leak-free split.
 - **Specialist recommendation** — maps predicted conditions to the right type of doctor (Cardiologist, Psychiatrist, Dermatologist, etc.).
 - **Severity scoring (0–100) and risk classification** (🟢 Low / 🟡 Medium / 🔴 High) with real-time alerts on next steps.
 
@@ -36,11 +36,25 @@ SwasthyaSathi predicts likely diseases from user-reported symptoms, explains res
 
 | Layer | Technology |
 |---|---|
-| ML Model | Scikit-learn (`SGDClassifier`), joblib |
+| ML Model | XGBoost (`XGBClassifier`), Scikit-learn, joblib |
 | GenAI | Groq API (Llama 3.3 70B) |
 | Frontend / App | Streamlit |
 | Geolocation & Maps | Nominatim, Overpass API, Google Maps (directions) |
 | Data | NumPy, Pandas, SciPy (sparse matrices) |
+
+---
+
+## 📊 Model Performance
+
+Three classifiers were benchmarked on a stratified, deduplicated split (587 diseases, after removing ~23% exact-duplicate rows and filtering diseases with fewer than 10 samples):
+
+| Model          | Top-1 Accuracy | Top-3 Accuracy | Macro F1 |
+|----------------|---------------:|---------------:|---------:|
+| Random Forest  | 71.2%          | 83.7%          | 69.4%    |
+| SGDClassifier  | 79.4%          | 92.3%          | 53.9%    |
+| **XGBoost**    | **81.5%**      | **93.8%**      | **74.6%**|
+
+XGBoost is the deployed model — it wins on every metric, including the handling of underrepresented diseases (reflected in its higher macro F1). Remaining low-performing classes are almost entirely diseases with fewer than 10 test-set examples, a data-scarcity limitation rather than a model weakness. The app surfaces the top-3 predicted diseases per query, matching the model's strongest metric.
 
 ---
 
@@ -75,7 +89,7 @@ SwasthyaSathi predicts likely diseases from user-reported symptoms, explains res
 ## 📂 Model Files
 
 The app expects these pre-trained artifacts in the project root:
-- `disease_model.pkl` — trained `SGDClassifier`
+- `disease_model.pkl` — trained `XGBClassifier` (class-weighted, incremental batch training with early stopping)
 - `label_encoder.pkl` — `LabelEncoder` for disease labels
 - `symptoms_list.pkl` — ordered list of known symptom strings used as model features
 
@@ -90,7 +104,7 @@ User Input (free text OR manual symptom selection)
 [GenAI: symptom extraction]  ──(if free text)──▶  matched symptoms
         │
         ▼
-Feature vector → SGDClassifier → Top-3 predicted diseases
+Feature vector → XGBoost (class-weighted) → Top-3 predicted diseases
         │
         ▼
 Severity scoring + specialist mapping
